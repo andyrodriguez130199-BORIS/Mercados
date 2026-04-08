@@ -176,13 +176,20 @@ def build_price_matrix(start: datetime, end: datetime, tickers: list[str]) -> pd
         series_list.append(series)
 
     if not series_list:
-        raise ValueError("No se obtuvieron series de precios válidas.")
+        raise ValueError("No se obtuvieron series de precios válidas. Verifica tickers y conectividad.")
 
     prices = pd.concat(series_list, axis=1).dropna(how="all")
     prices = prices.ffill().dropna()
     if prices.shape[1] < MIN_ASSETS:
-        raise ValueError(f"Activos válidos insuficientes ({prices.shape[1]}).")
+        raise ValueError(
+            f"Activos válidos insuficientes ({prices.shape[1]}). "
+            f"Mínimo requerido: {MIN_ASSETS}."
+        )
     return prices
+
+
+def _format_weights(weights: pd.Series) -> pd.DataFrame:
+    return (weights[weights > MIN_WEIGHT_THRESHOLD] * 100).round(2).rename("Peso (%)").to_frame()
 
 
 def simulate_portfolios(returns: pd.DataFrame, num_portfolios: int) -> PortfolioResult:
@@ -201,7 +208,10 @@ def simulate_portfolios(returns: pd.DataFrame, num_portfolios: int) -> Portfolio
     sharpe = _safe_sharpe(port_returns, port_vol, RISK_FREE_RATE)
 
     if np.isnan(sharpe).all():
-        raise ValueError("No fue posible calcular Sharpe ratios válidos.")
+        raise ValueError(
+            "No fue posible calcular Sharpe ratios válidos. "
+            "Revisa si los datos tienen volatilidad cero o valores faltantes."
+        )
     max_idx = int(np.nanargmax(sharpe))
     gmv_idx = int(np.nanargmin(port_vol))
 
@@ -216,8 +226,8 @@ def simulate_portfolios(returns: pd.DataFrame, num_portfolios: int) -> Portfolio
         max_idx=max_idx,
         gmv_idx=gmv_idx,
         assets=assets,
-        weights_df_max=(max_weights[max_weights > MIN_WEIGHT_THRESHOLD] * 100).round(2).rename("Peso (%)").to_frame(),
-        weights_df_gmv=(gmv_weights[gmv_weights > MIN_WEIGHT_THRESHOLD] * 100).round(2).rename("Peso (%)").to_frame(),
+        weights_df_max=_format_weights(max_weights),
+        weights_df_gmv=_format_weights(gmv_weights),
         expected_returns=mu,
         covariance=cov,
         used_tickers={},

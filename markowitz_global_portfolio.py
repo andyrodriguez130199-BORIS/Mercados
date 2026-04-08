@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+from functools import partial
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from io import BytesIO
 from typing import Iterable
 
@@ -19,6 +20,8 @@ TRADING_DAYS = 252
 NUM_PORTFOLIOS = 100_000
 MIN_ASSETS = 8
 OUTPUT_FILE = "Resultados_Markowitz.xlsx"
+MIN_PRICE_OBSERVATIONS = 200
+EXPORT_TAIL_ROWS = 300
 
 
 MARKETS: dict[str, list[str]] = {
@@ -50,6 +53,7 @@ GLOBAL_FALLBACK_TICKERS = [
     "DIS",
     "CSCO",
 ]
+VALIDATION_CACHE: dict[str, bool] = {}
 
 
 @dataclass
@@ -93,18 +97,27 @@ def _download_close(
         else:
             series = data.squeeze().dropna()
 
-        if len(series) >= 200:
+        if len(series) >= MIN_PRICE_OBSERVATIONS:
             series.name = ticker
             return series
     return None
 
 
 def _validate_ticker(ticker: str) -> bool:
+    if ticker in VALIDATION_CACHE:
+        return VALIDATION_CACHE[ticker]
     try:
         probe = yf.download(ticker, period="6mo", interval="1d", progress=False, auto_adjust=True)
     except Exception:
+        VALIDATION_CACHE[ticker] = False
         return False
-    return probe is not None and not probe.empty
+    valid = probe is not None and not probe.empty
+    VALIDATION_CACHE[ticker] = valid
+    return valid
+
+
+def _safe_sharpe(returns: np.ndarray, volatility: np.ndarray, risk_free_rate: float) -> np.ndarray:
+    return (returns - risk_free_rate) / np.where(volatility == 0, np.nan, volatility)
 
 
 def resolve_tickers(markets: dict[str, list[str]]) -> dict[str, list[str]]:
@@ -180,7 +193,7 @@ def simulate_portfolios(returns: pd.DataFrame, num_portfolios: int) -> Portfolio
     port_returns = random_w @ mu.values
     cov_np = cov.values
     port_vol = np.sqrt(np.einsum("ij,jk,ik->i", random_w, cov_np, random_w))
-    sharpe = (port_returns - RISK_FREE_RATE) / np.where(port_vol == 0, np.nan, port_vol)
+    sharpe = _safe_sharpe(port_returns, port_vol, RISK_FREE_RATE)
 
     max_idx = int(np.nanargmax(sharpe))
     gmv_idx = int(np.nanargmin(port_vol))
@@ -225,7 +238,7 @@ def optimize_frontier(returns: pd.DataFrame, target_points: int = 50) -> pd.Data
     for t in targets:
         constraints = (
             {"type": "eq", "fun": weight_sum_constraint},
-            {"type": "eq", "fun": lambda w, tr=t: target_return_constraint(w, tr)},
+            {"type": "eq", "fun": partial(target_return_constraint, target=t)},
         )
         result = minimize(var_fn, x0=x0, method="SLSQP", bounds=bounds, constraints=constraints)
         if result.success:
@@ -331,8 +344,8 @@ def export_single_excel(
     with pd.ExcelWriter(output_path, engine="openpyxl") as writer:
         summary.to_excel(writer, sheet_name="Resumen", index=False, startrow=0)
         market_table.to_excel(writer, sheet_name="Resumen", index=False, startrow=len(summary) + 3)
-        prices.tail(300).to_excel(writer, sheet_name="Precios")
-        returns.tail(300).to_excel(writer, sheet_name="Rendimientos")
+        prices.tail(EXPORT_TAIL_ROWS).to_excel(writer, sheet_name="Precios")
+        returns.tail(EXPORT_TAIL_ROWS).to_excel(writer, sheet_name="Rendimientos")
         corr.to_excel(writer, sheet_name="Correlacion")
         port.weights_df_max.to_excel(writer, sheet_name="Pesos_MaxSharpe")
         port.weights_df_gmv.to_excel(writer, sheet_name="Pesos_GMV")
@@ -360,7 +373,7 @@ def main() -> None:
     print("=" * 65)
     print("\n📥  Descargando datos históricos …")
 
-    end = datetime.utcnow()
+    end = datetime.now(timezone.utc)
     start = end - timedelta(days=365 * 10)
 
     used_tickers = resolve_tickers(MARKETS)

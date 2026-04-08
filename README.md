@@ -1,6 +1,6 @@
 # Mercados
 
-Script principal: `/home/runner/work/Mercados/Mercados/markowitz_global_portfolio.py`
+Script principal: `markowitz_global_portfolio.py`
 
 ## Requisitos
 
@@ -22,7 +22,7 @@ pip install numpy pandas matplotlib scipy yfinance openpyxl
 ## Ejecución
 
 ```bash
-python /home/runner/work/Mercados/Mercados/markowitz_global_portfolio.py
+python markowitz_global_portfolio.py
 ```
 
 ## Qué hace

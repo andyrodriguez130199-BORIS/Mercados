@@ -214,12 +214,18 @@ def optimize_frontier(returns: pd.DataFrame, target_points: int = 50) -> pd.Data
     def var_fn(w: np.ndarray) -> float:
         return float(w.T @ cov.values @ w)
 
+    def weight_sum_constraint(w: np.ndarray) -> float:
+        return float(np.sum(w) - 1.0)
+
+    def target_return_constraint(w: np.ndarray, target: float) -> float:
+        return float(np.dot(w, mu.values) - target)
+
     targets = np.linspace(mu.min(), mu.max(), target_points)
     frontier = []
     for t in targets:
         constraints = (
-            {"type": "eq", "fun": lambda w: np.sum(w) - 1},
-            {"type": "eq", "fun": lambda w, tr=t: np.dot(w, mu.values) - tr},
+            {"type": "eq", "fun": weight_sum_constraint},
+            {"type": "eq", "fun": lambda w, tr=t: target_return_constraint(w, tr)},
         )
         result = minimize(var_fn, x0=x0, method="SLSQP", bounds=bounds, constraints=constraints)
         if result.success:

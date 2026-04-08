@@ -1,0 +1,29 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+.env
+*.egg-info/
+dist/
+build/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Generated outputs (run markowitz_optimization.py to regenerate)
+Resultados_Markowitz.xlsx
+Frontera_Eficiente.png
+Pesos_MaxSharpe.png
+Pesos_GMV.png
+Pesos_MaxSharpe_Pie.png
+Pesos_GMV_Pie.png
+Comparacion_Portafolios.png
+Mapa_Correlacion.png
+
+# OS
+.DS_Store
+Thumbs.db

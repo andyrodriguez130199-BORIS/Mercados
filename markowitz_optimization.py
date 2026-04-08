@@ -609,8 +609,8 @@ def main() -> None:
     weights_ms_norm = filter_and_normalize(optimal["max_sharpe"]["weights"], WEIGHT_THRESHOLD)
     weights_gmv_norm = filter_and_normalize(optimal["gmv"]["weights"], WEIGHT_THRESHOLD)
 
-    print(f"\n   Activos activos Max Sharpe: {(weights_ms_norm > 0).sum()}")
-    print(f"   Activos activos GMV       : {(weights_gmv_norm > 0).sum()}")
+    print(f"\n   Activos incluidos Max Sharpe: {(weights_ms_norm > 0).sum()}")
+    print(f"   Activos incluidos GMV       : {(weights_gmv_norm > 0).sum()}")
 
     # ── 6. Construcción de DataFrames
     dataframes = build_dataframes(

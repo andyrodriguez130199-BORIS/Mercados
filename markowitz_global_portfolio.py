@@ -4,6 +4,7 @@ from functools import partial
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from io import BytesIO
+import os
 from typing import Iterable
 
 import matplotlib.pyplot as plt
@@ -22,6 +23,9 @@ MIN_ASSETS = 8
 OUTPUT_FILE = "Resultados_Markowitz.xlsx"
 MIN_PRICE_OBSERVATIONS = 200
 EXPORT_TAIL_ROWS = 300
+MIN_WEIGHT_THRESHOLD = 0.001
+DOWNLOAD_WINDOWS = (10, 5, 3, 2, 1)
+RANDOM_SEED = 42
 
 
 MARKETS: dict[str, list[str]] = {
@@ -107,7 +111,7 @@ def _validate_ticker(ticker: str) -> bool:
     if ticker in VALIDATION_CACHE:
         return VALIDATION_CACHE[ticker]
     try:
-        probe = yf.download(ticker, period="6mo", interval="1d", progress=False, auto_adjust=True)
+        probe = yf.download(ticker, period="1mo", interval="1d", progress=False, auto_adjust=True)
     except Exception:
         VALIDATION_CACHE[ticker] = False
         return False
@@ -165,7 +169,7 @@ def resolve_tickers(markets: dict[str, list[str]]) -> dict[str, list[str]]:
 def build_price_matrix(start: datetime, end: datetime, tickers: list[str]) -> pd.DataFrame:
     series_list: list[pd.Series] = []
     for ticker in tickers:
-        series = _download_close(ticker, start, end, windows=(10, 5, 3, 2, 1))
+        series = _download_close(ticker, start, end, windows=DOWNLOAD_WINDOWS)
         if series is None:
             print(f"   ⚠️  Sin datos suficientes para {ticker}; se omite.")
             continue
@@ -187,6 +191,7 @@ def simulate_portfolios(returns: pd.DataFrame, num_portfolios: int) -> Portfolio
     mu = returns.mean() * TRADING_DAYS
     cov = returns.cov() * TRADING_DAYS
 
+    np.random.seed(RANDOM_SEED)
     random_w = np.random.random((num_portfolios, n_assets))
     random_w /= random_w.sum(axis=1, keepdims=True)
 
@@ -195,6 +200,8 @@ def simulate_portfolios(returns: pd.DataFrame, num_portfolios: int) -> Portfolio
     port_vol = np.sqrt(np.einsum("ij,jk,ik->i", random_w, cov_np, random_w))
     sharpe = _safe_sharpe(port_returns, port_vol, RISK_FREE_RATE)
 
+    if np.isnan(sharpe).all():
+        raise ValueError("No fue posible calcular Sharpe ratios válidos.")
     max_idx = int(np.nanargmax(sharpe))
     gmv_idx = int(np.nanargmin(port_vol))
 
@@ -209,8 +216,8 @@ def simulate_portfolios(returns: pd.DataFrame, num_portfolios: int) -> Portfolio
         max_idx=max_idx,
         gmv_idx=gmv_idx,
         assets=assets,
-        weights_df_max=(max_weights[max_weights > 0.001] * 100).round(2).rename("Peso (%)").to_frame(),
-        weights_df_gmv=(gmv_weights[gmv_weights > 0.001] * 100).round(2).rename("Peso (%)").to_frame(),
+        weights_df_max=(max_weights[max_weights > MIN_WEIGHT_THRESHOLD] * 100).round(2).rename("Peso (%)").to_frame(),
+        weights_df_gmv=(gmv_weights[gmv_weights > MIN_WEIGHT_THRESHOLD] * 100).round(2).rename("Peso (%)").to_frame(),
         expected_returns=mu,
         covariance=cov,
         used_tickers={},
@@ -220,6 +227,8 @@ def simulate_portfolios(returns: pd.DataFrame, num_portfolios: int) -> Portfolio
 def optimize_frontier(returns: pd.DataFrame, target_points: int = 50) -> pd.DataFrame:
     mu = returns.mean() * TRADING_DAYS
     cov = returns.cov() * TRADING_DAYS
+    if mu.isna().any():
+        raise ValueError("Los rendimientos esperados contienen NaN; no se puede construir la frontera.")
     n_assets = len(mu)
     bounds = tuple((0.0, 1.0) for _ in range(n_assets))
     x0 = np.ones(n_assets) / n_assets
@@ -373,7 +382,11 @@ def main() -> None:
     print("=" * 65)
     print("\n📥  Descargando datos históricos …")
 
-    end = datetime.now(timezone.utc)
+    end_env = os.getenv("MARKOWITZ_END_DATE")
+    if end_env:
+        end = datetime.fromisoformat(end_env).replace(tzinfo=timezone.utc)
+    else:
+        end = datetime.now(timezone.utc)
     start = end - timedelta(days=365 * 10)
 
     used_tickers = resolve_tickers(MARKETS)
